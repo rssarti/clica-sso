@@ -7,7 +7,7 @@ data:
   # Configurações da aplicação
   VITE_API_URL: "https://api.clicatecnologia.com.br"
   VITE_SSO_URL: "https://accounts.clicatecnologia.com.br"
-  VITE_SOCKET_IO: "https://socket.clicatecnologia.com.br"
+  VITE_SOCKET_IO: "wss://ws.clicatecnologia.com.br"
   VITE_SOCKET_PATCH: "/socket.io/"
   
   # Configurações do Nginx (opcional)

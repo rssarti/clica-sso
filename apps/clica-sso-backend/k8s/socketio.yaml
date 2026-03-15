@@ -22,10 +22,10 @@ metadata:
 spec:
   tls:
   - hosts:
-    - socket.clicatecnologia.com.br
+    - ws.clicatecnologia.com.br
     secretName: clica-sso-socket-tls
   rules:
-  - host: socket.clicatecnologia.com.br
+  - host: ws.clicatecnologia.com.br
     http:
       paths:
       - path: /
