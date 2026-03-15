@@ -5,7 +5,7 @@ metadata:
   namespace: clica-sso
 data:
   # RabbitMQ Configuration
-  RABBITMQ_HOST: "rabbitmq.default.svc.cluster.local"
+  RABBITMQ_HOST: "10.136.28.241"
   RABBITMQ_PORT: "5672"
 
   # Frontend API URL (used during build)
@@ -17,7 +17,7 @@ data:
   NODE_ENV: "production"
   LOG_LEVEL: "info"
 
-  # Database Configuration (example - adjust as needed)
-  DB_HOST: "postgres.default.svc.cluster.local"
+  # Database Configuration
+  DB_HOST: "10.136.28.241"
   DB_PORT: "5432"
-  DB_NAME: "clica_sso"
+  DB_NAME: "clicasso_db"

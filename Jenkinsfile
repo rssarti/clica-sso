@@ -258,6 +258,8 @@ pipeline {
                         # Apply namespace and configmap
                         kubectl apply -f k8s/namespace.yaml
                         kubectl apply -f k8s/configmap.yaml
+                        # ClusterRoleBinding roleRef is immutable - delete before apply
+                        kubectl delete clusterrolebinding jenkins-deployer-binding --ignore-not-found
                         kubectl apply -f k8s/service-account.yaml
                         
                         # Apply deployments
