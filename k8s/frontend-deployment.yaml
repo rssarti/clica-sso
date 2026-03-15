@@ -6,7 +6,7 @@ metadata:
   labels:
     app: clica-sso-frontend
 spec:
-  replicas: 2
+  replicas: 1
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -47,11 +47,11 @@ spec:
 
           resources:
             requests:
-              memory: "128Mi"
-              cpu: "100m"
+              memory: "64Mi"
+              cpu: "20m"
             limits:
-              memory: "256Mi"
-              cpu: "500m"
+              memory: "128Mi"
+              cpu: "200m"
 
           livenessProbe:
             httpGet:
