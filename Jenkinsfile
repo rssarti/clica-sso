@@ -194,12 +194,13 @@ pipeline {
             steps {
                 echo 'Updating Kubernetes secrets from .env file...'
                 withCredentials([string(credentialsId: KUBE_CREDENTIALS_ID, variable: 'KUBE_TOKEN')]) {
+                    def k3sServer = env.K3S_SERVER ?: 'https://127.0.0.1:6443'
                     sh """
                         # Use temporary kubeconfig to avoid permission issues
                         export KUBECONFIG=/tmp/kubeconfig-\${BUILD_ID}
                         
                         # Configure kubectl
-                        kubectl config set-cluster k3s --server=${env.K3S_SERVER:-https://127.0.0.1:6443} --insecure-skip-tls-verify=true
+                        kubectl config set-cluster k3s --server=${k3sServer} --insecure-skip-tls-verify=true
                         kubectl config set-credentials jenkins-deployer --token=\${KUBE_TOKEN}
                         kubectl config set-context k3s --cluster=k3s --user=jenkins-deployer --namespace=${NAMESPACE}
                         kubectl config use-context k3s
@@ -226,12 +227,13 @@ pipeline {
             steps {
                 echo 'Deploying to Kubernetes...'
                 withCredentials([string(credentialsId: KUBE_CREDENTIALS_ID, variable: 'KUBE_TOKEN')]) {
+                    def k3sServer = env.K3S_SERVER ?: 'https://127.0.0.1:6443'
                     sh """
                         # Use temporary kubeconfig to avoid permission issues
                         export KUBECONFIG=/tmp/kubeconfig-\${BUILD_ID}
                         
                         # Configure kubectl
-                        kubectl config set-cluster k3s --server=${env.K3S_SERVER:-https://127.0.0.1:6443} --insecure-skip-tls-verify=true
+                        kubectl config set-cluster k3s --server=${k3sServer} --insecure-skip-tls-verify=true
                         kubectl config set-credentials jenkins-deployer --token=\${KUBE_TOKEN}
                         kubectl config set-context k3s --cluster=k3s --user=jenkins-deployer --namespace=${NAMESPACE}
                         kubectl config use-context k3s
@@ -273,12 +275,13 @@ pipeline {
             steps {
                 echo 'Running database migrations...'
                 withCredentials([string(credentialsId: KUBE_CREDENTIALS_ID, variable: 'KUBE_TOKEN')]) {
+                    def k3sServer = env.K3S_SERVER ?: 'https://127.0.0.1:6443'
                     sh """
                         # Use temporary kubeconfig
                         export KUBECONFIG=/tmp/kubeconfig-\${BUILD_ID}
                         
                         # Configure kubectl
-                        kubectl config set-cluster k3s --server=${env.K3S_SERVER:-https://127.0.0.1:6443} --insecure-skip-tls-verify=true
+                        kubectl config set-cluster k3s --server=${k3sServer} --insecure-skip-tls-verify=true
                         kubectl config set-credentials jenkins-deployer --token=\${KUBE_TOKEN}
                         kubectl config set-context k3s --cluster=k3s --user=jenkins-deployer --namespace=${NAMESPACE}
                         kubectl config use-context k3s
@@ -303,12 +306,13 @@ pipeline {
             steps {
                 echo 'Seeding database...'
                 withCredentials([string(credentialsId: KUBE_CREDENTIALS_ID, variable: 'KUBE_TOKEN')]) {
+                    def k3sServer = env.K3S_SERVER ?: 'https://127.0.0.1:6443'
                     sh """
                         # Use temporary kubeconfig
                         export KUBECONFIG=/tmp/kubeconfig-\${BUILD_ID}
                         
                         # Configure kubectl
-                        kubectl config set-cluster k3s --server=${env.K3S_SERVER:-https://127.0.0.1:6443} --insecure-skip-tls-verify=true
+                        kubectl config set-cluster k3s --server=${k3sServer} --insecure-skip-tls-verify=true
                         kubectl config set-credentials jenkins-deployer --token=\${KUBE_TOKEN}
                         kubectl config set-context k3s --cluster=k3s --user=jenkins-deployer --namespace=${NAMESPACE}
                         kubectl config use-context k3s
