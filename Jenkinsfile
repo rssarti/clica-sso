@@ -137,7 +137,7 @@ pipeline {
                     steps {
                         echo "Building backend Docker image: ${BACKEND_IMAGE}"
                         sh """
-                            docker build -t ${BACKEND_IMAGE} apps/clica-sso-backend/
+                            docker build -t ${BACKEND_IMAGE} -f apps/clica-sso-backend/Dockerfile .
                             docker tag ${BACKEND_IMAGE} ${DOCKER_REGISTRY}/clica-sso-backend:latest
                         """
                     }
@@ -152,7 +152,7 @@ pipeline {
                                 --build-arg VITE_SOCKET_IO=wss://ws.clicatecnologia.com.br \\
                                 --build-arg VITE_SOCKET_PATCH=/socket.io/ \\
                                 -t ${FRONTEND_IMAGE} \\
-                                apps/clica-sso-front/
+                                -f apps/clica-sso-front/Dockerfile .
                             docker tag ${FRONTEND_IMAGE} ${DOCKER_REGISTRY}/clica-sso-frontend:latest
                         """
                     }
@@ -162,7 +162,7 @@ pipeline {
                     steps {
                         echo "Building WebSocket Docker image: ${WEBSOCKET_IMAGE}"
                         sh """
-                            docker build -t ${WEBSOCKET_IMAGE} apps/clica-sso-backend/
+                            docker build -t ${WEBSOCKET_IMAGE} -f apps/clica-sso-backend/Dockerfile .
                             docker tag ${WEBSOCKET_IMAGE} ${DOCKER_REGISTRY}/clica-sso-websocket:latest
                         """
                     }

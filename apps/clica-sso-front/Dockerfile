@@ -1,5 +1,5 @@
 # ===== DOCKERFILE PARA CLICA SSO FRONTEND =====
-# Dockerfile multi-stage para otimizar tamanho da imagem final
+# Build context: repo root (pnpm-lock.yaml lives at root)
 # Stage 1: Build da aplicação React/Vite
 FROM node:20-alpine AS builder
 
@@ -9,18 +9,27 @@ WORKDIR /app
 # Instalar pnpm globalmente
 RUN npm install -g pnpm
 
-# Copiar arquivos de dependências
-COPY package.json pnpm-lock.yaml ./
+# Copiar arquivos de dependências do monorepo
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/clica-sso-front/package.json ./apps/clica-sso-front/
 
-# Instalar dependências (cache layer)
-RUN pnpm install --frozen-lockfile
+# Instalar apenas dependências do frontend
+RUN pnpm install --frozen-lockfile --filter clica-sso-front...
 
-# Copiar código fonte
-COPY . .
+# Copiar código fonte do frontend
+COPY apps/clica-sso-front/ ./apps/clica-sso-front/
+
+# Build args para variáveis de ambiente Vite
+ARG VITE_API_URL=https://api.clicatecnologia.com.br
+ARG VITE_SOCKET_IO=wss://ws.clicatecnologia.com.br
+ARG VITE_SOCKET_PATCH=/socket.io/
+
+ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_SOCKET_IO=$VITE_SOCKET_IO
+ENV VITE_SOCKET_PATCH=$VITE_SOCKET_PATCH
 
 # Build da aplicação para produção
-# As variáveis de ambiente VITE_* serão definidas em runtime
-RUN pnpm run build
+RUN pnpm --filter clica-sso-front run build
 
 # ===== Stage 2: Produção com Nginx =====
 FROM nginx:alpine AS production
@@ -35,7 +44,7 @@ COPY nginx-main.conf /etc/nginx/nginx.conf
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Copiar arquivos buildados do stage anterior
-COPY --from=builder /app/dist /usr/share/nginx/html
+COPY --from=builder /app/apps/clica-sso-front/dist /usr/share/nginx/html
 
 # Criar diretórios necessários e ajustar permissões
 RUN mkdir -p /tmp /var/cache/nginx/client_temp /var/cache/nginx/proxy_temp \
