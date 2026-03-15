@@ -219,9 +219,12 @@ pipeline {
                         kubectl config set-context k3s --cluster=k3s --user=jenkins-deployer --namespace=${NAMESPACE}
                         kubectl config use-context k3s
                         
-                        # Create secret from .env file
+                        # Ensure namespace exists before creating secrets
+                        kubectl apply -f k8s/namespace.yaml
+                        
+                        # Create secret from .env file (ENV_FILE passed via shell var to avoid Groovy interpolation)
                         kubectl create secret generic clica-sso-secrets \\
-                            --from-env-file=${ENV_FILE} \\
+                            --from-env-file=\${ENV_FILE} \\
                             --namespace=${NAMESPACE} \\
                             --dry-run=client -o yaml | kubectl apply -f -
                         
