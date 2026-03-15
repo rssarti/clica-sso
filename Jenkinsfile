@@ -33,9 +33,9 @@ pipeline {
         ).trim()
         
         // Image names
-        BACKEND_IMAGE = "${DOCKER_REGISTRY}/${DOCKER_USERNAME}/clica-sso-backend:${GIT_COMMIT_SHORT}"
-        FRONTEND_IMAGE = "${DOCKER_REGISTRY}/${DOCKER_USERNAME}/clica-sso-frontend:${GIT_COMMIT_SHORT}"
-        WEBSOCKET_IMAGE = "${DOCKER_REGISTRY}/${DOCKER_USERNAME}/clica-sso-websocket:${GIT_COMMIT_SHORT}"
+        BACKEND_IMAGE = "${DOCKER_REGISTRY}/clica-sso-backend:${GIT_COMMIT_SHORT}"
+        FRONTEND_IMAGE = "${DOCKER_REGISTRY}/clica-sso-frontend:${GIT_COMMIT_SHORT}"
+        WEBSOCKET_IMAGE = "${DOCKER_REGISTRY}/clica-sso-websocket:${GIT_COMMIT_SHORT}"
     }
     
     stages {
@@ -138,7 +138,7 @@ pipeline {
                         echo "Building backend Docker image: ${BACKEND_IMAGE}"
                         sh """
                             docker build -t ${BACKEND_IMAGE} -f apps/clica-sso-backend/Dockerfile .
-                            docker tag ${BACKEND_IMAGE} ${DOCKER_REGISTRY}/${DOCKER_USERNAME}/clica-sso-backend:latest
+                            docker tag ${BACKEND_IMAGE} ${DOCKER_REGISTRY}/clica-sso-backend:latest
                         """
                     }
                 }
@@ -153,7 +153,7 @@ pipeline {
                                 --build-arg VITE_SOCKET_PATCH=/socket.io/ \\
                                 -t ${FRONTEND_IMAGE} \\
                                 -f apps/clica-sso-front/Dockerfile .
-                            docker tag ${FRONTEND_IMAGE} ${DOCKER_REGISTRY}/${DOCKER_USERNAME}/clica-sso-frontend:latest
+                            docker tag ${FRONTEND_IMAGE} ${DOCKER_REGISTRY}/clica-sso-frontend:latest
                         """
                     }
                 }
@@ -163,7 +163,7 @@ pipeline {
                         echo "Building WebSocket Docker image: ${WEBSOCKET_IMAGE}"
                         sh """
                             docker build -t ${WEBSOCKET_IMAGE} -f apps/clica-sso-backend/Dockerfile .
-                            docker tag ${WEBSOCKET_IMAGE} ${DOCKER_REGISTRY}/${DOCKER_USERNAME}/clica-sso-websocket:latest
+                            docker tag ${WEBSOCKET_IMAGE} ${DOCKER_REGISTRY}/clica-sso-websocket:latest
                         """
                     }
                 }
@@ -184,13 +184,13 @@ pipeline {
                             echo "\${DOCKER_PASS}" | docker login -u "\${DOCKER_USER}" --password-stdin
                             
                             docker push ${BACKEND_IMAGE}
-                            docker push ${DOCKER_REGISTRY}/${DOCKER_USERNAME}/clica-sso-backend:latest
+                            docker push ${DOCKER_REGISTRY}/clica-sso-backend:latest
                             
                             docker push ${FRONTEND_IMAGE}
-                            docker push ${DOCKER_REGISTRY}/${DOCKER_USERNAME}/clica-sso-frontend:latest
+                            docker push ${DOCKER_REGISTRY}/clica-sso-frontend:latest
                             
                             docker push ${WEBSOCKET_IMAGE}
-                            docker push ${DOCKER_REGISTRY}/${DOCKER_USERNAME}/clica-sso-websocket:latest
+                            docker push ${DOCKER_REGISTRY}/clica-sso-websocket:latest
                             
                             docker logout
                         """
