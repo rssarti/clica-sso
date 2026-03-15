@@ -197,7 +197,7 @@ pipeline {
                     sh """
                         # Use temporary kubeconfig to avoid permission issues
                         export KUBECONFIG=/tmp/kubeconfig-\${BUILD_ID}
-                        K3S_SERVER=${K3S_SERVER:-https://127.0.0.1:6443}
+                        K3S_SERVER=\${K3S_SERVER:-https://127.0.0.1:6443}
                         
                         # Configure kubectl
                         kubectl config set-cluster k3s --server=\${K3S_SERVER} --insecure-skip-tls-verify=true
@@ -230,7 +230,7 @@ pipeline {
                     sh """
                         # Use temporary kubeconfig to avoid permission issues
                         export KUBECONFIG=/tmp/kubeconfig-\${BUILD_ID}
-                        K3S_SERVER=${K3S_SERVER:-https://127.0.0.1:6443}
+                        K3S_SERVER=\${K3S_SERVER:-https://127.0.0.1:6443}
                         
                         # Configure kubectl
                         kubectl config set-cluster k3s --server=\${K3S_SERVER} --insecure-skip-tls-verify=true
@@ -278,7 +278,7 @@ pipeline {
                     sh """
                         # Use temporary kubeconfig
                         export KUBECONFIG=/tmp/kubeconfig-\${BUILD_ID}
-                        K3S_SERVER=${K3S_SERVER:-https://127.0.0.1:6443}
+                        K3S_SERVER=\${K3S_SERVER:-https://127.0.0.1:6443}
                         
                         # Configure kubectl
                         kubectl config set-cluster k3s --server=\${K3S_SERVER} --insecure-skip-tls-verify=true
@@ -309,7 +309,7 @@ pipeline {
                     sh """
                         # Use temporary kubeconfig
                         export KUBECONFIG=/tmp/kubeconfig-\${BUILD_ID}
-                        K3S_SERVER=${K3S_SERVER:-https://127.0.0.1:6443}
+                        K3S_SERVER=\${K3S_SERVER:-https://127.0.0.1:6443}
                         
                         # Configure kubectl
                         kubectl config set-cluster k3s --server=\${K3S_SERVER} --insecure-skip-tls-verify=true
