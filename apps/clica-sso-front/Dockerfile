@@ -38,10 +38,10 @@ FROM nginx:alpine AS production
 RUN apk add --no-cache gettext
 
 # Copiar configuração nginx principal customizada
-COPY nginx-main.conf /etc/nginx/nginx.conf
+COPY apps/clica-sso-front/nginx-main.conf /etc/nginx/nginx.conf
 
 # Copiar configuração do site
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY apps/clica-sso-front/nginx.conf /etc/nginx/conf.d/default.conf
 
 # Copiar arquivos buildados do stage anterior
 COPY --from=builder /app/apps/clica-sso-front/dist /usr/share/nginx/html
