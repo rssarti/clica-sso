@@ -60,19 +60,29 @@ pipeline {
                 sh '''
                     set -e
                     
-                    # Check if unzip is available
-                    if ! command -v unzip > /dev/null 2>&1; then
-                        echo "ERROR: unzip is not installed!"
-                        echo "Please install it on Jenkins server"
-                        exit 1
+                    # Load nvm if already installed but not in PATH
+                    export NVM_DIR="$HOME/.nvm"
+                    [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+                    
+                    # Install Node.js via nvm if npm is not available
+                    if ! command -v npm > /dev/null 2>&1; then
+                        echo "npm not found — installing Node.js 20 via nvm..."
+                        curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+                        export NVM_DIR="$HOME/.nvm"
+                        . "$NVM_DIR/nvm.sh"
+                        nvm install 20
+                        nvm alias default 20
+                        nvm use default
                     fi
                     
-                    echo "✓ unzip is available"
+                    echo "✓ Node.js $(node -v) / npm $(npm -v) available"
                     
                     # Install pnpm if not available
-                    npm install -g pnpm
+                    if ! command -v pnpm > /dev/null 2>&1; then
+                        npm install -g pnpm
+                    fi
                     
-                    echo "✓ pnpm is available"
+                    echo "✓ pnpm $(pnpm -v) available"
                     
                     # Install project dependencies
                     echo "Installing dependencies with pnpm..."
@@ -93,6 +103,8 @@ pipeline {
                         echo 'Building backend...'
                         dir('apps/clica-sso-backend') {
                             sh '''
+                                export NVM_DIR="$HOME/.nvm"
+                                [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
                                 pnpm run build
                             '''
                         }
@@ -104,6 +116,8 @@ pipeline {
                         echo 'Building frontend...'
                         dir('apps/clica-sso-front') {
                             sh '''
+                                export NVM_DIR="$HOME/.nvm"
+                                [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
                                 pnpm run build
                             '''
                         }
