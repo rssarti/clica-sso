@@ -271,9 +271,9 @@ pipeline {
                         # Force pods to pull the newly pushed image (kubectl apply only restarts
                         # pods if the Deployment spec changed; since we use :latest tag, the spec
                         # is identical on every run, so we must explicitly trigger a rollout restart)
-                        kubectl set image deployment/clica-sso-backend clica-sso-backend=${BACKEND_IMAGE} -n ${NAMESPACE}
-                        kubectl set image deployment/clica-sso-frontend clica-sso-frontend=${FRONTEND_IMAGE} -n ${NAMESPACE}
-                        kubectl set image deployment/clica-sso-websocket clica-sso-websocket=${WEBSOCKET_IMAGE} -n ${NAMESPACE}
+                        kubectl set image deployment/clica-sso-backend backend=${BACKEND_IMAGE} -n ${NAMESPACE}
+                        kubectl set image deployment/clica-sso-frontend frontend=${FRONTEND_IMAGE} -n ${NAMESPACE}
+                        kubectl set image deployment/clica-sso-websocket websocket=${WEBSOCKET_IMAGE} -n ${NAMESPACE}
                         
                         # Wait for deployment to be ready
                         echo "Waiting for deployments to rollout..."
