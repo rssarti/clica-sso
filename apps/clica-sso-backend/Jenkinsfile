@@ -1,0 +1,197 @@
+pipeline {
+    agent {
+        kubernetes {
+            yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: jenkins-agent
+spec:
+  serviceAccountName: jenkins-deployer
+  containers:
+    - name: node
+      image: node:20-alpine
+      command:
+        - cat
+      tty: true
+      resources:
+        requests:
+          memory: "384Mi"
+          cpu: "100m"
+        limits:
+          memory: "500Mi"
+          cpu: "500m"
+      volumeMounts:
+        - mountPath: "/home/jenkins/agent"
+          name: "workspace-volume"
+    - name: kubectl
+      image: alpine/k8s:1.28.3
+      command:
+        - cat
+      tty: true
+      resources:
+        requests:
+          memory: "32Mi"
+          cpu: "25m"
+        limits:
+          memory: "64Mi"
+          cpu: "100m"
+      volumeMounts:
+        - mountPath: "/home/jenkins/agent"
+          name: "workspace-volume"
+    - name: kaniko
+      image: gcr.io/kaniko-project/executor:v1.16.0-debug
+      command: ["/busybox/cat"]
+      tty: true
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "200m"
+        limits:
+          memory: "1Gi"
+          cpu: "1000m"
+      volumeMounts:
+        - mountPath: "/home/jenkins/agent"
+          name: "workspace-volume"
+        - name: docker-config
+          mountPath: "/kaniko/.docker"
+  volumes:
+    - name: workspace-volume
+      emptyDir: {}
+    - name: docker-config
+      emptyDir: {}
+"""
+        }
+    }
+    environment {
+        DOCKER_IMAGE = "sispsolutions/clica-sso-backend"
+        GIT_CREDENTIALS = "github"
+        DOCKER_CREDENTIALS = "dockerhub"
+        DOCKER_IMAGE_TAG = "${env.DOCKER_IMAGE}:${env.BUILD_ID}"
+    }
+    stages {
+        stage('Checkout') {
+            steps {
+                container('node') {
+                    echo "Clonando repositório..."
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: '*/main']],
+                        userRemoteConfigs: [[
+                            url: 'https://github.com/rssarti/clica-sso-backend',
+                            credentialsId: GIT_CREDENTIALS
+                        ]]
+                    ])
+                }
+            }
+        }
+        stage('Install Dependencies') {
+            steps {
+                container('node') {
+                    echo "Instalando dependências...."
+                    sh '''
+                        apk update && apk add --no-cache git
+                        corepack enable
+                        corepack prepare pnpm@latest --activate
+                        pnpm install
+                    '''
+                }
+            }
+        }
+        stage('Build Application') {
+            steps {
+                container('node') {
+                    echo "Buildando aplicação..."
+                    sh 'NODE_OPTIONS="--max-old-space-size=512" pnpm run build'
+                }
+            }
+        }
+       
+        stage('Build & Push Docker Image (Kaniko)') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: env.DOCKER_CREDENTIALS,
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS')
+                ]) {
+                    container('kaniko') {
+                        echo "Construindo e enviando imagem Kaniko: ${DOCKER_IMAGE_TAG}..."
+                        sh '''
+                            cat > /kaniko/.docker/config.json <<EOF
+{
+  "auths": {
+    "https://index.docker.io/v1/": {
+      "auth": "$(echo -n ${DOCKER_USER}:${DOCKER_PASS} | base64)"
+    }
+  }
+}
+EOF
+                            /kaniko/executor --context=${PWD} \\
+                                --dockerfile=Dockerfile \\
+                                --destination=''' + "${DOCKER_IMAGE_TAG}" + ''' \\
+                                --destination=''' + "${DOCKER_IMAGE}:latest" + '''
+                        '''
+                    }
+                }
+            }
+        }
+        stage('Deploy to Production') {
+            steps {
+                container('kubectl') {
+                    echo "Aplicando deploy (imagem: ${DOCKER_IMAGE_TAG})..."
+                    script {
+                        sh "kubectl apply -f k8s/deployment.yaml"
+                        sh "kubectl set image deployment/clica-sso-backend clica-sso-backend=${DOCKER_IMAGE_TAG} -n default"
+                        
+                        def rolloutStatus = sh(script: "kubectl rollout status deployment/clica-sso-backend -n default --timeout=180s", returnStatus: true)
+                        
+                        if (rolloutStatus != 0) {
+                            echo "⚠️ Rollout falhou ou demorou muito. Verificando status..."
+                            sh "kubectl get pods -n default -l app=clica-sso-backend"
+                            sh "kubectl describe pods -n default -l app=clica-sso-backend | tail -100"
+                            error("Rollout falhou - verifique os logs acima")
+                        }
+                    }
+                }
+            }
+        }
+        stage('Health Check') {
+            steps {
+                container('kubectl') {
+                    echo "Verificando status do deployment..."
+                    sh 'kubectl get pods -l app=clica-sso-backend'
+                    sh 'kubectl logs -l app=clica-sso-backend --tail=20'
+                }
+            }
+        }
+        stage('Verify API') {
+            steps {
+                container('kubectl') {
+                    echo "Verificando API está respondendo..."
+                    sh '''
+                        # Aguardar um pouco para o serviço estar pronto
+                        sleep 10
+                        # Verificar se o serviço está acessível
+                        kubectl run curl-test --image=curlimages/curl:latest --rm -i --restart=Never -- \\
+                            curl -f http://clica-sso-backend-service/health || echo "Health check ainda não disponível"
+                    '''
+                }
+            }
+        }
+    }
+    post {
+        always {
+            echo "Limpando workspace..."
+            cleanWs()
+        }
+        success {
+            echo "✅ Deploy concluído com sucesso!"
+            echo "API disponível em: https://api.clicatecnologia.com.br"
+        }
+        failure {
+            echo "❌ Deploy falhou!"
+            echo "Verifique os logs para mais detalhes"
+        }
+    }
+}

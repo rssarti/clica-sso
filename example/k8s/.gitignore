@@ -1,0 +1,4 @@
+# Ignore arquivos com credenciais reais
+.env.jenkins
+.env.production
+*.credentials

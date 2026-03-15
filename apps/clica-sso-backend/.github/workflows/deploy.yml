@@ -1,0 +1,406 @@
+name: Deploy to Digital Ocean Droplet
+
+on:
+  push:
+    branches:
+      - main
+      - production
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '22.x'
+  PNPM_VERSION: '9.x'
+
+jobs:
+  build-and-deploy:
+    name: 🚀 Build & Deploy
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: 📥 Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: 🏗️ Build application
+        run: pnpm run build
+
+      - name: 📝 Create production .env file
+        run: |
+          echo "🔧 Creating production environment file..."
+          rm -f .env
+          cp .env.prod .env
+          echo "✅ Production .env file created successfully"
+          echo "📊 Environment file info:"
+          echo "Lines in .env: $(wc -l < .env)"
+          echo "File size: $(du -h .env | cut -f1)"
+
+      - name: 🔍 Validate environment file
+        run: |
+          echo "🔍 Validating environment configuration..."
+          required_vars=(
+            "DB_HOST"
+            "DB_PORT" 
+            "DB_USERNAME"
+            "DB_NAME"
+            "JWT_SECRET"
+            "NODE_ENV"
+          )
+          missing_vars=()
+          for var in "${required_vars[@]}"; do
+            if ! grep -q "^${var}=" .env; then
+              missing_vars+=("$var")
+            fi
+          done
+          if [ ${#missing_vars[@]} -ne 0 ]; then
+            echo "❌ Missing required environment variables: ${missing_vars[*]}"
+            exit 1
+          fi
+          echo "✅ All required environment variables are present"
+
+      - name: 📦 Create deployment package
+        run: |
+          echo "📦 Creating deployment package..."
+          mkdir -p deploy-package
+          cp -r dist/ deploy-package/
+          cp -r node_modules/ deploy-package/
+          cp package.json deploy-package/
+          cp pnpm-lock.yaml deploy-package/
+          cp .env deploy-package/
+          if [ -d "cert" ]; then
+            cp -r cert/ deploy-package/
+          fi
+          
+          # Create tar with verbose output and verification
+          echo "🗜️ Creating compressed archive..."
+          tar -czf clica-sso-backend.tar.gz -C deploy-package .
+          
+          # Verify the archive integrity
+          echo "🔍 Verifying archive integrity..."
+          if tar -tzf clica-sso-backend.tar.gz > /dev/null; then
+            echo "✅ Archive verification passed"
+            echo "📊 Archive size: $(ls -lh clica-sso-backend.tar.gz | awk '{print $5}')"
+            echo "📋 Archive contents:"
+            tar -tzf clica-sso-backend.tar.gz | head -10
+          else
+            echo "❌ Archive verification failed!"
+            exit 1
+          fi
+
+      - name: 🔐 Setup SSH
+        run: |
+          echo "🔐 Setting up SSH connection..."
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DROPLET_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.DROPLET_HOST }} >> ~/.ssh/known_hosts
+          echo "✅ SSH configured successfully"
+
+      - name: 🚀 Deploy to Droplet
+        run: |
+          echo "🚀 Deploying to droplet..."
+          
+          # Test connection and prepare server
+          echo "🔍 Testing connection and preparing server..."
+          ssh ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }} "
+            mkdir -p /home/${{ secrets.DROPLET_USER }}/
+            echo '🧹 Cleaning /tmp to free space...'
+            sudo find /tmp -type f -mtime +1 -delete 2>/dev/null || true
+            sudo rm -f /tmp/clica-sso-backend.tar.gz 2>/dev/null || true
+            df -h /tmp/ /home/${{ secrets.DROPLET_USER }}/
+            free -h
+            echo 'Server preparation completed'
+          "
+          
+          # Upload with verification
+          echo "📤 Uploading deployment package..."
+          LOCAL_SIZE=$(stat -c%s clica-sso-backend.tar.gz)
+          echo "📊 Local file size: $LOCAL_SIZE bytes"
+          
+          # Check /tmp space and prefer home directory if /tmp is full
+          TMP_AVAILABLE=$(ssh ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }} "df /tmp | tail -1 | awk '{print \$4}'")
+          echo "📊 /tmp available space: ${TMP_AVAILABLE}KB"
+          
+          if [ "$TMP_AVAILABLE" -gt 100000 ]; then
+            echo "📤 Trying /tmp (sufficient space)..."
+            if scp clica-sso-backend.tar.gz ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }}:/tmp/; then
+              echo "✅ Upload to /tmp/ completed"
+              
+              # Quick integrity check
+              ssh ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }} "
+                if [ -f '/tmp/clica-sso-backend.tar.gz' ] && [ -s '/tmp/clica-sso-backend.tar.gz' ]; then
+                  if tar -tzf '/tmp/clica-sso-backend.tar.gz' >/dev/null 2>&1; then
+                    echo '✅ Archive integrity verified'
+                  else
+                    echo '❌ Archive corrupted, removing...'
+                    rm -f '/tmp/clica-sso-backend.tar.gz'
+                    exit 1
+                  fi
+                else
+                  echo '❌ Upload verification failed'
+                  exit 1
+                fi
+              " && UPLOAD_PATH="/tmp/clica-sso-backend.tar.gz" || {
+                echo "⚠️ /tmp upload verification failed, trying home directory..."
+                scp clica-sso-backend.tar.gz ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }}:/home/${{ secrets.DROPLET_USER }}/ && UPLOAD_PATH="/home/${{ secrets.DROPLET_USER }}/clica-sso-backend.tar.gz"
+              }
+            else
+              echo "⚠️ /tmp upload failed, trying home directory..."
+              scp clica-sso-backend.tar.gz ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }}:/home/${{ secrets.DROPLET_USER }}/ && UPLOAD_PATH="/home/${{ secrets.DROPLET_USER }}/clica-sso-backend.tar.gz"
+            fi
+          else
+            echo "⚠️ /tmp full (${TMP_AVAILABLE}KB available), using home directory..."
+            scp clica-sso-backend.tar.gz ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }}:/home/${{ secrets.DROPLET_USER }}/ && UPLOAD_PATH="/home/${{ secrets.DROPLET_USER }}/clica-sso-backend.tar.gz"
+          fi
+          
+          if [ -z "$UPLOAD_PATH" ]; then
+            echo "❌ Upload failed to both locations!"
+            exit 1
+          fi
+          
+          echo "✅ Upload completed successfully to: $UPLOAD_PATH"
+          
+          echo "📝 Creating systemd service configuration..."
+          chmod +x scripts/create-systemd-service.sh
+          ./scripts/create-systemd-service.sh
+          
+          echo "📤 Uploading systemd service configuration..."
+          ls -la clica-sso.service
+          
+          # Upload service file with verification
+          echo "📤 Uploading service file..."
+          if scp -v clica-sso.service ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }}:/tmp/; then
+            echo "✅ Service file uploaded to /tmp/"
+            
+            # Verify service file was uploaded correctly
+            ssh ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }} "
+              if [ -f '/tmp/clica-sso.service' ]; then
+                echo '✅ Service file found on server'
+                echo '📊 File size: '\$(stat -c%s /tmp/clica-sso.service)' bytes'
+                if grep -q 'ExecStart=' /tmp/clica-sso.service; then
+                  echo '✅ ExecStart found in uploaded file'
+                  grep 'ExecStart=' /tmp/clica-sso.service
+                else
+                  echo '❌ ExecStart NOT found in uploaded file!'
+                  echo '📄 File content:'
+                  cat /tmp/clica-sso.service
+                fi
+              else
+                echo '❌ Service file not found on server!'
+              fi
+            "
+          elif scp -v clica-sso.service ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }}:/home/${{ secrets.DROPLET_USER }}/; then
+            echo "✅ Service file uploaded to home directory"
+          else
+            echo "❌ Service file upload failed!"
+            exit 1
+          fi
+          
+          echo "🔧 Executing deployment on droplet..."
+          ssh ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }} << 'EOF'
+            echo "📁 Preparing deployment directory..."
+            sudo mkdir -p /var/www/clica-sso-backend
+            cd /var/www/clica-sso-backend
+            
+            if [ -d "current" ]; then
+              echo "💾 Backing up current version..."
+              sudo cp -r current backup-$(date +%Y%m%d-%H%M%S) || true
+            fi
+            
+            echo "📦 Extracting new version..."
+            sudo rm -rf current
+            sudo mkdir current
+            
+            # Determine source file location and extract with verification
+            if [ -f "/tmp/clica-sso-backend.tar.gz" ]; then
+              ARCHIVE_PATH="/tmp/clica-sso-backend.tar.gz"
+            elif [ -f "/home/$USER/clica-sso-backend.tar.gz" ]; then
+              ARCHIVE_PATH="/home/$USER/clica-sso-backend.tar.gz"
+            else
+              echo "❌ ERROR: Archive file not found!"
+              exit 1
+            fi
+            
+            echo "📂 Extracting from: $ARCHIVE_PATH"
+            if sudo tar -xzf "$ARCHIVE_PATH" -C current; then
+              echo "✅ Extraction successful"
+              sudo chown -R $USER:$USER current
+              cd current
+              echo "📋 Extracted contents:"
+              ls -la | head -10
+            else
+              echo "❌ ERROR: Extraction failed!"
+              echo "🔍 Archive verification:"
+              tar -tzf "$ARCHIVE_PATH" > /dev/null && echo "Archive is valid" || echo "Archive is corrupted"
+              exit 1
+            fi
+            cd current
+            
+            echo "🔄 Stopping application..."
+            sudo pkill -f "node.*clica-sso" || true
+            sudo systemctl stop clica-sso || true
+            
+            echo "📦 Installing/updating dependencies..."
+            
+            # Check if node_modules was included in the package
+            if [ -d "node_modules" ] && [ "$(ls -A node_modules)" ]; then
+              echo "✅ Dependencies already included in package, skipping installation"
+            else
+              echo "🔧 Installing dependencies with pnpm..."
+              export PATH=$PATH:/usr/local/bin:/home/$USER/.local/share/pnpm
+              
+              # Install pnpm if not available
+              if ! command -v pnpm &> /dev/null; then
+                echo "📥 Installing pnpm..."
+                # Check available disk space before downloading
+                FREE_SPACE=$(df /tmp | tail -1 | awk '{print $4}')
+                if [ "$FREE_SPACE" -lt 100000 ]; then
+                  echo "⚠️ Low disk space, cleaning up..."
+                  sudo apt-get clean || true
+                  sudo rm -rf /var/cache/apt/archives/* || true
+                fi
+                
+                # Install with retry logic
+                for i in {1..3}; do
+                  if curl -fsSL https://get.pnpm.io/install.sh | sh -; then
+                    echo "✅ pnpm installation successful"
+                    break
+                  else
+                    echo "⚠️ pnpm installation attempt $i failed, retrying..."
+                    sleep 5
+                  fi
+                done
+                
+                export PATH=$PATH:/home/$USER/.local/share/pnpm
+                
+                # Verify pnpm installation
+                if ! command -v pnpm &> /dev/null; then
+                  echo "❌ pnpm installation failed, using npm as fallback"
+                  npm install --production --no-optional
+                else
+                  pnpm install --prod --frozen-lockfile
+                fi
+              else
+                echo "✅ pnpm already available"
+                pnpm install --prod --frozen-lockfile
+              fi
+            fi
+            
+            echo "⚙️ Configurando systemd service..."
+            
+            # Validate service file before copying
+            if [ -f "/tmp/clica-sso.service" ]; then
+              echo "🔍 Validating service file at /tmp/clica-sso.service..."
+              if grep -q "ExecStart=" /tmp/clica-sso.service; then
+                echo "✅ ExecStart found in service file"
+                grep "ExecStart=" /tmp/clica-sso.service
+                sudo cp /tmp/clica-sso.service /etc/systemd/system/
+              else
+                echo "❌ ERROR: ExecStart NOT found in /tmp/clica-sso.service!"
+                echo "📄 Service file content:"
+                cat /tmp/clica-sso.service
+                exit 1
+              fi
+            elif [ -f "/home/$USER/clica-sso.service" ]; then
+              echo "🔍 Validating service file at /home/$USER/clica-sso.service..."
+              if grep -q "ExecStart=" /home/$USER/clica-sso.service; then
+                echo "✅ ExecStart found in service file"
+                grep "ExecStart=" /home/$USER/clica-sso.service
+                sudo cp /home/$USER/clica-sso.service /etc/systemd/system/
+              else
+                echo "❌ ERROR: ExecStart NOT found in /home/$USER/clica-sso.service!"
+                echo "📄 Service file content:"
+                cat /home/$USER/clica-sso.service
+                exit 1
+              fi
+            else
+              echo "❌ ERROR: No service file found!"
+              exit 1
+            fi
+            
+            # Double-check the installed service file
+            echo "🔍 Verifying installed service file at /etc/systemd/system/clica-sso.service..."
+            if grep -q "ExecStart=" /etc/systemd/system/clica-sso.service; then
+              echo "✅ Final service file validation passed"
+              grep "ExecStart=" /etc/systemd/system/clica-sso.service
+            else
+              echo "❌ ERROR: Final service file validation failed!"
+              echo "📄 Installed service file content:"
+              cat /etc/systemd/system/clica-sso.service
+              exit 1
+            fi
+            
+            echo "🔄 Habilitando e iniciando serviços..."
+            sudo systemctl daemon-reload
+            sudo systemctl enable clica-sso
+            sudo systemctl start clica-sso
+            
+            echo "⏳ Aguardando aplicação inicializar..."
+            sleep 10
+            
+            echo "📊 Status dos serviços..."
+            sudo systemctl status clica-sso --no-pager -l
+            
+            echo "🧹 Limpando arquivos temporários..."
+            rm -f /tmp/clica-sso-backend.tar.gz
+            rm -f /tmp/clica-sso.service
+            rm -f /home/$USER/clica-sso.service
+            
+            echo "✅ Deployment completed successfully!"
+            echo "🚀 Backend API rodando na porta 3000"
+            echo "🔗 Acesso direto: http://${{ secrets.DROPLET_HOST }}:3000"
+            echo "🩺 Health check: http://${{ secrets.DROPLET_HOST }}:3000/ping"
+            echo ""
+            echo "📋 Configuração nginx deve ser feita manualmente:"
+            echo "  1. Configure nginx como proxy reverso"
+            echo "  2. Configure domínio api.clicatecnologia.com.br"  
+            echo "  3. Configure SSL com Let's Encrypt se necessário"
+            
+            if pgrep -f "node.*main.js" > /dev/null; then
+              echo "🎉 Application is running!"
+            else
+              echo "⚠️ Application may not be running. Check logs with: sudo journalctl -u clica-sso -f"
+            fi
+          EOF
+
+      - name: 🔍 Verify deployment
+        run: |
+          echo "🔍 Verifying deployment..."
+          sleep 15
+          
+          echo "🧪 Testing direct port access..."
+          if curl -f http://${{ secrets.DROPLET_HOST }}:3000/ping 2>/dev/null; then
+            echo "✅ Direct port 3000 health check passed!"
+          else
+            echo "❌ Direct port 3000 health check failed"
+          fi
+
+      - name: 📊 Deployment Status
+        run: |
+          echo "🎉 Deployment completed!"
+          echo "📝 Environment file processed and deployed"
+          echo "🚀 Backend API rodando na porta 3000"
+          echo "🔗 Application disponível em: http://${{ secrets.DROPLET_HOST }}:3000"
+          echo "🩺 Health check: http://${{ secrets.DROPLET_HOST }}:3000/ping"
+          echo ""
+          echo "📋 Configuração manual necessária:"
+          echo "1. Configurar nginx como proxy reverso para porta 3000"
+          echo "2. Configurar DNS api.clicatecnologia.com.br para apontar para ${{ secrets.DROPLET_HOST }}"
+          echo "3. Configurar SSL com Let's Encrypt se necessário"
+          echo ""
+          echo "🔧 Comandos úteis no droplet:"
+          echo "   sudo systemctl status clica-sso    # Status da aplicação"
+          echo "   sudo journalctl -u clica-sso -f    # Logs da aplicação"
+          echo "   curl http://localhost:3000/ping     # Testar aplicação local"

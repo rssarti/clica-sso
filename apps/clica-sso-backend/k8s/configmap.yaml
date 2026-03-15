@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clica-sso-backend-config
+  namespace: default
+data:
+  # Configurações da aplicação
+  NODE_ENV: "production"
+  PORT: "3000"
+  
+  # URLs públicas
+  CORS_ORIGIN: "https://accounts.clicatecnologia.com.br"
+  API_URL: "https://api.clicatecnologia.com.br"
+  FRONTEND_URL: "https://accounts.clicatecnologia.com.br"
+  
+  # Configurações de logging
+  LOG_LEVEL: "info"
+  
+  # Configurações de rate limiting
+  RATE_LIMIT_WINDOW_MS: "900000"
+  RATE_LIMIT_MAX_REQUESTS: "100"
+  
+  # Configurações de sessão
+  SESSION_TIMEOUT: "86400000"
+  
+  # Timezone
+  TZ: "America/Sao_Paulo"

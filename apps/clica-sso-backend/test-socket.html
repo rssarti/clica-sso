@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Socket.IO - Clica SSO</title>
+    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 { color: #333; }
+        .status {
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .connected { background: #d4edda; color: #155724; }
+        .disconnected { background: #f8d7da; color: #721c24; }
+        .connecting { background: #fff3cd; color: #856404; }
+        input, button {
+            padding: 10px;
+            margin: 5px;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover { background: #0056b3; }
+        #messages {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin-top: 20px;
+            background: #fafafa;
+        }
+        .message {
+            padding: 8px;
+            margin: 5px 0;
+            border-left: 3px solid #007bff;
+            background: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔌 Socket.IO Test - Clica SSO</h1>
+        
+        <div id="status" class="status connecting">
+            Status: Connecting...
+        </div>
+
+        <div>
+            <h3>Configuração:</h3>
+            <label>Server URL:</label>
+            <input type="text" id="serverUrl" value="https://socket.clicatecnologia.com.br" style="width: 400px;">
+            <button onclick="connect()">Conectar</button>
+            <button onclick="disconnect()">Desconectar</button>
+        </div>
+
+        <div style="margin-top: 20px;">
+            <h3>Enviar Mensagem:</h3>
+            <input type="text" id="messageInput" placeholder="Digite uma mensagem..." style="width: 300px;">
+            <button onclick="sendMessage()">Enviar</button>
+        </div>
+
+        <div>
+            <h3>Mensagens Recebidas:</h3>
+            <div id="messages"></div>
+        </div>
+
+        <div style="margin-top: 20px;">
+            <h3>Info do Cliente:</h3>
+            <div id="clientInfo" style="font-family: monospace; font-size: 12px;"></div>
+        </div>
+    </div>
+
+    <script>
+        let socket = null;
+
+        function updateStatus(status, className) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = `Status: ${status}`;
+            statusEl.className = `status ${className}`;
+        }
+
+        function addMessage(message) {
+            const messagesEl = document.getElementById('messages');
+            const messageEl = document.createElement('div');
+            messageEl.className = 'message';
+            messageEl.innerHTML = `<small>${new Date().toLocaleTimeString()}</small><br>${message}`;
+            messagesEl.appendChild(messageEl);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        function updateClientInfo() {
+            if (socket) {
+                document.getElementById('clientInfo').innerHTML = `
+                    Client ID: ${socket.id || 'N/A'}<br>
+                    Connected: ${socket.connected}<br>
+                    Transport: ${socket.io.engine?.transport?.name || 'N/A'}
+                `;
+            }
+        }
+
+        function connect() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            
+            if (socket) {
+                socket.disconnect();
+            }
+
+            updateStatus('Connecting...', 'connecting');
+            
+            socket = io(serverUrl, {
+                transports: ['websocket', 'polling'],
+                reconnection: true,
+                reconnectionDelay: 1000,
+                reconnectionAttempts: 5
+            });
+
+            socket.on('connect', () => {
+                updateStatus('Connected ✓', 'connected');
+                addMessage(`✅ Conectado ao servidor! ID: ${socket.id}`);
+                updateClientInfo();
+            });
+
+            socket.on('disconnect', (reason) => {
+                updateStatus('Disconnected ✗', 'disconnected');
+                addMessage(`❌ Desconectado: ${reason}`);
+                updateClientInfo();
+            });
+
+            socket.on('connect_error', (error) => {
+                updateStatus('Connection Error ✗', 'disconnected');
+                addMessage(`❌ Erro de conexão: ${error.message}`);
+                console.error('Connection error:', error);
+            });
+
+            socket.on('message', (data) => {
+                addMessage(`📨 Mensagem: ${JSON.stringify(data)}`);
+            });
+
+            socket.on('notification', (data) => {
+                addMessage(`🔔 Notificação: ${JSON.stringify(data)}`);
+            });
+
+            socket.on('user_joined', (data) => {
+                addMessage(`👋 Usuário entrou: ${JSON.stringify(data)}`);
+            });
+
+            socket.on('user_left', (data) => {
+                addMessage(`👋 Usuário saiu: ${JSON.stringify(data)}`);
+            });
+        }
+
+        function disconnect() {
+            if (socket) {
+                socket.disconnect();
+                socket = null;
+                updateStatus('Disconnected', 'disconnected');
+                updateClientInfo();
+            }
+        }
+
+        function sendMessage() {
+            if (!socket || !socket.connected) {
+                alert('Não conectado ao servidor!');
+                return;
+            }
+
+            const message = document.getElementById('messageInput').value;
+            if (!message) {
+                alert('Digite uma mensagem!');
+                return;
+            }
+
+            socket.emit('message', { message });
+            addMessage(`📤 Enviado: ${message}`);
+            document.getElementById('messageInput').value = '';
+        }
+
+        connect();
+    </script>
+</body>
+</html>

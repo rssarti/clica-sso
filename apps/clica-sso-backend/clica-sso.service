@@ -1,0 +1,27 @@
+[Unit]
+Description=Clica SSO Backend - Node.js Application
+Documentation=https://github.com/rssarti/clica-sso-backend
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/var/www/clica-sso-backend/current
+ExecStart=/usr/local/bin/node dist/main.js
+Restart=on-failure
+RestartSec=10
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=clica-sso
+Environment=NODE_ENV=production
+Environment=PORT=3000
+
+# Security measures
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/clica-sso-backend
+
+[Install]
+WantedBy=multi-user.target

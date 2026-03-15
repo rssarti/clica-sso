@@ -1,0 +1,124 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: guindakila-backend
+  namespace: guindakila
+  labels:
+    app: guindakila-backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: guindakila-backend
+  template:
+    metadata:
+      labels:
+        app: guindakila-backend
+    spec:
+      containers:
+        - name: backend
+          image: docker.io/sispsolutions/guindakila-backend:latest
+          imagePullPolicy: Always
+          workingDir: /app/apps/backend
+          command: ["bun", "run", "/app/dist/index.js"]
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            # Database
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: guindakila-secrets
+                  key: DATABASE_URL
+            # JWT
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: guindakila-secrets
+                  key: JWT_SECRET
+            # S3/MinIO
+            - name: S3_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: guindakila-config
+                  key: S3_ENDPOINT
+            - name: S3_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: guindakila-config
+                  key: S3_REGION
+            - name: S3_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: guindakila-config
+                  key: S3_BUCKET
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: guindakila-secrets
+                  key: S3_ACCESS_KEY
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: guindakila-secrets
+                  key: S3_SECRET_KEY
+            - name: S3_PUBLIC_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: guindakila-config
+                  key: S3_PUBLIC_URL
+            # RabbitMQ
+            - name: RABBITMQ_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: guindakila-config
+                  key: RABBITMQ_URL
+            # OpenAI
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: guindakila-secrets
+                  key: OPENAI_API_KEY
+            # WebSocket Server URL (internal service)
+            - name: WS_URL
+              value: "http://guindakila-ws-service:8081"
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "200m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket:
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: guindakila-backend-service
+  namespace: guindakila
+  labels:
+    app: guindakila-backend
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3000
+      targetPort: 3000
+      protocol: TCP
+      name: http
+  selector:
+    app: guindakila-backend

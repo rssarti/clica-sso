@@ -1,0 +1,41 @@
+# Turborepo ignore patterns
+# Files that don't affect builds
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# CI/CD
+.github/**
+.gitlab-ci.yml
+Jenkinsfile
+.circleci/**
+
+# Documentation
+*.md
+docs/
+README*
+
+# Docker files (optional - remove these if they affect builds)
+Dockerfile
+docker-compose.yml
+docker-entrypoint.sh
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode
+.idea
+.nvmrc
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db

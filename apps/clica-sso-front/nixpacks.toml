@@ -1,0 +1,18 @@
+# ===== NIXPACKS CONFIGURATION PARA COOLIFY =====
+# Configuração simplificada para SPA React no Coolify
+
+[variables]
+NODE_ENV = "production"
+
+[phases.setup]
+nixPkgs = ["nodejs_20", "pnpm"]
+
+[phases.install]
+cmd = "pnpm install --frozen-lockfile"
+
+[phases.build]
+cmd = "pnpm run build"
+
+[start]
+# Usar o script start que já está configurado
+cmd = "pnpm start"

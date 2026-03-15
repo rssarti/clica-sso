@@ -1,0 +1,513 @@
+pipeline {
+    agent any
+    
+    parameters {
+        choice(
+            name: 'ACTION',
+            choices: [
+                'Deploy (Normal)',
+                'Deploy + Seed Database',
+                'Seed Database Only',
+                'Migration Only',
+                'Generate Migration Only'
+            ],
+            description: 'Selecione a ação a ser executada no pipeline'
+        )
+    }
+    
+    environment {
+        // Docker Registry - Using DockerHub
+        DOCKER_REGISTRY = 'docker.io/sispsolutions'
+        DOCKER_CREDENTIALS_ID = 'dockerhub'
+        
+        // Kubernetes Configuration
+        NAMESPACE = 'guindakila'
+        KUBE_CREDENTIALS_ID = 'jenkins-deployer-token'
+        
+        // Environment file - Single .env file with all secrets
+        ENV_FILE = credentials('guindakila-env-file')
+        
+        // Git commit hash for image tagging
+        GIT_COMMIT_SHORT = sh(
+            script: "git rev-parse --short HEAD",
+            returnStdout: true
+        ).trim()
+        
+        // Image names
+        BACKEND_IMAGE = "${DOCKER_REGISTRY}/guindakila-backend:${GIT_COMMIT_SHORT}"
+        WEB_IMAGE = "${DOCKER_REGISTRY}/guindakila-web:${GIT_COMMIT_SHORT}"
+        WS_IMAGE = "${DOCKER_REGISTRY}/guindakila-ws:${GIT_COMMIT_SHORT}"
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                echo "Selected action: ${params.ACTION}"
+                echo 'Checking out code...'
+                checkout scm
+            }
+        }
+        
+        stage('Install Dependencies') {
+            when {
+                expression { 
+                    params.ACTION == 'Deploy (Normal)' || 
+                    params.ACTION == 'Deploy + Seed Database' ||
+                    params.ACTION == 'Generate Migration Only'
+                }
+            }
+            steps {
+                echo 'Installing dependencies...'
+                sh '''
+                    set -e
+                    
+                    # Check if unzip is available (required for Bun)
+                    if ! command -v unzip > /dev/null 2>&1; then
+                        echo "ERROR: unzip is not installed!"
+                        echo "Please install it on Jenkins server:"
+                        echo "  sudo apt-get update && sudo apt-get install -y unzip"
+                        exit 1
+                    fi
+                    
+                    echo "✓ unzip is available"
+                    
+                    # Install Bun if not available
+                    if ! command -v bun > /dev/null 2>&1; then
+                        echo "Installing Bun..."
+                        curl -fsSL https://bun.sh/install | bash
+                    fi
+                    
+                    echo "✓ Bun is available"
+                    
+                    # Install project dependencies
+                    export PATH="$HOME/.bun/bin:$PATH"
+                    echo "Installing dependencies with Bun..."
+                    bun install
+                '''
+            }
+        }
+        
+        stage('Build Applications') {
+            when {
+                not {
+                    expression { params.ACTION ==~ /.*Only/ }
+                }
+            }
+            parallel {
+                stage('Build Backend') {
+                    steps {
+                        echo 'Building backend...'
+                        dir('apps/backend') {
+                            sh '''
+                                export PATH="$HOME/.bun/bin:$PATH"
+                                bun run build
+                            '''
+                        }
+                    }
+                }
+                
+                stage('Build Web') {
+                    steps {
+                        echo 'Building web frontend...'
+                        dir('apps/web') {
+                            sh '''
+                                export PATH="$HOME/.bun/bin:$PATH"
+                                echo "Using .env.production from apps/web directory"
+                                cat .env.production
+                                bun run build
+                            '''
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Build Docker Images') {
+            when {
+                not {
+                    expression { params.ACTION ==~ /.*Only/ }
+                }
+            }
+            parallel {
+                stage('Backend Image') {
+                    steps {
+                        echo "Building backend Docker image: ${BACKEND_IMAGE}"
+                        sh """
+                            docker build -t ${BACKEND_IMAGE} -f apps/backend/Dockerfile .
+                            docker tag ${BACKEND_IMAGE} ${DOCKER_REGISTRY}/guindakila-backend:latest
+                        """
+                    }
+                }
+                
+                stage('Web Image') {
+                    steps {
+                        echo "Building web Docker image: ${WEB_IMAGE}"
+                        sh """
+                            docker build \\
+                                --build-arg VITE_API_URL=https://api.guindakila.com.br \\
+                                --build-arg VITE_WS_URL=wss://ws.guindakila.com.br \\
+                                -t ${WEB_IMAGE} \\
+                                -f apps/web/Dockerfile .
+                            docker tag ${WEB_IMAGE} ${DOCKER_REGISTRY}/guindakila-web:latest
+                        """
+                    }
+                }
+                
+                stage('WebSocket Image') {
+                    steps {
+                        echo "Building WebSocket Docker image: ${WS_IMAGE}"
+                        sh """
+                            docker build -t ${WS_IMAGE} -f apps/ws/Dockerfile .
+                            docker tag ${WS_IMAGE} ${DOCKER_REGISTRY}/guindakila-ws:latest
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Push Docker Images') {
+            when {
+                not {
+                    expression { params.ACTION ==~ /.*Only/ }
+                }
+            }
+            steps {
+                echo 'Pushing Docker images to registry...'
+                script {
+                    withCredentials([usernamePassword(credentialsId: DOCKER_CREDENTIALS_ID, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        sh """
+                            echo "\${DOCKER_PASS}" | docker login -u "\${DOCKER_USER}" --password-stdin
+                            
+                            docker push ${BACKEND_IMAGE}
+                            docker push ${DOCKER_REGISTRY}/guindakila-backend:latest
+                            
+                            docker push ${WEB_IMAGE}
+                            docker push ${DOCKER_REGISTRY}/guindakila-web:latest
+                            
+                            docker push ${WS_IMAGE}
+                            docker push ${DOCKER_REGISTRY}/guindakila-ws:latest
+                            
+                            docker logout
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Update Kubernetes Secrets') {
+            when {
+                not {
+                    expression { params.ACTION ==~ /.*Only/ }
+                }
+            }
+            steps {
+                echo 'Updating Kubernetes secrets from .env file...'
+                withCredentials([string(credentialsId: KUBE_CREDENTIALS_ID, variable: 'KUBE_TOKEN')]) {
+                    sh """
+                        # Use temporary kubeconfig to avoid permission issues
+                        export KUBECONFIG=/tmp/kubeconfig-\${BUILD_ID}
+                        
+                        # Configure kubectl
+                        kubectl config set-cluster k3s --server=https://127.0.0.1:6443 --insecure-skip-tls-verify=true
+                        kubectl config set-credentials jenkins-deployer --token=\${KUBE_TOKEN}
+                        kubectl config set-context k3s --cluster=k3s --user=jenkins-deployer --namespace=${NAMESPACE}
+                        kubectl config use-context k3s
+                        
+                        # Create secret from .env file
+                        kubectl create secret generic guindakila-secrets \\
+                            --from-env-file=${ENV_FILE} \\
+                            --namespace=${NAMESPACE} \\
+                            --dry-run=client -o yaml | kubectl apply -f -
+                        
+                        # Cleanup temporary kubeconfig
+                        rm -f /tmp/kubeconfig-\${BUILD_ID}
+                    """
+                }
+            }
+        }
+        
+        stage('Deploy to Kubernetes') {
+            when {
+                not {
+                    expression { params.ACTION ==~ /.*Only/ }
+                }
+            }
+            steps {
+                echo 'Deploying to Kubernetes...'
+                withCredentials([string(credentialsId: KUBE_CREDENTIALS_ID, variable: 'KUBE_TOKEN')]) {
+                    sh """
+                        # Use temporary kubeconfig to avoid permission issues
+                        export KUBECONFIG=/tmp/kubeconfig-\${BUILD_ID}
+                        
+                        # Configure kubectl
+                        kubectl config set-cluster k3s --server=https://127.0.0.1:6443 --insecure-skip-tls-verify=true
+                        kubectl config set-credentials jenkins-deployer --token=\${KUBE_TOKEN}
+                        kubectl config set-context k3s --cluster=k3s --user=jenkins-deployer --namespace=${NAMESPACE}
+                        kubectl config use-context k3s
+                        
+                        # Apply namespace and configmap (if not exists)
+                        kubectl apply -f k8s/namespace.yaml
+                        kubectl apply -f k8s/configmap.yaml
+                    
+                        # Apply deployments and services
+                        kubectl apply -f k8s/backend-deployment.yaml
+                        kubectl apply -f k8s/web-deployment.yaml
+                        kubectl apply -f k8s/ws-deployment.yaml
+                        
+                        # Apply ingress
+                        kubectl apply -f k8s/ingress.yaml
+                        
+                        # Update images to use new commit tag
+                        kubectl set image deployment/guindakila-backend \\
+                            backend=${BACKEND_IMAGE} \\
+                            -n ${NAMESPACE}
+                        
+                        kubectl set image deployment/guindakila-web \\
+                            web=${WEB_IMAGE} \\
+                            -n ${NAMESPACE}
+                        
+                        kubectl set image deployment/guindakila-ws \\
+                            ws=${WS_IMAGE} \\
+                            -n ${NAMESPACE}
+                        
+                        # Cleanup temporary kubeconfig
+                        rm -f /tmp/kubeconfig-\${BUILD_ID}
+                    """
+                }
+            }
+        }
+        
+        stage('Wait for Rollout') {
+            when {
+                not {
+                    expression { params.ACTION ==~ /.*Only/ }
+                }
+            }
+            steps {
+                echo 'Waiting for deployment rollout to complete...'
+                withCredentials([string(credentialsId: KUBE_CREDENTIALS_ID, variable: 'KUBE_TOKEN')]) {
+                    sh """
+                        # Use temporary kubeconfig to avoid permission issues
+                        export KUBECONFIG=/tmp/kubeconfig-\${BUILD_ID}
+                        
+                        # Configure kubectl
+                        kubectl config set-cluster k3s --server=https://127.0.0.1:6443 --insecure-skip-tls-verify=true
+                        kubectl config set-credentials jenkins-deployer --token=\${KUBE_TOKEN}
+                        kubectl config set-context k3s --cluster=k3s --user=jenkins-deployer --namespace=${NAMESPACE}
+                        kubectl config use-context k3s
+                        
+                        kubectl rollout status deployment/guindakila-backend -n ${NAMESPACE} --timeout=5m
+                        kubectl rollout status deployment/guindakila-web -n ${NAMESPACE} --timeout=5m
+                        kubectl rollout status deployment/guindakila-ws -n ${NAMESPACE} --timeout=5m
+                        
+                        # Cleanup temporary kubeconfig
+                        rm -f /tmp/kubeconfig-\${BUILD_ID}
+                    """
+                }
+            }
+        }
+        
+        stage('Run Database Migrations') {
+            when {
+                expression { 
+                    params.ACTION == 'Deploy (Normal)' || 
+                    params.ACTION == 'Deploy + Seed Database' ||
+                    params.ACTION == 'Migration Only'
+                }
+            }
+            steps {
+                echo 'Running database migrations...'
+                withCredentials([string(credentialsId: KUBE_CREDENTIALS_ID, variable: 'KUBE_TOKEN')]) {
+                    sh """
+                        # Use temporary kubeconfig to avoid permission issues
+                        export KUBECONFIG=/tmp/kubeconfig-\${BUILD_ID}
+                        
+                        # Configure kubectl
+                        kubectl config set-cluster k3s --server=https://127.0.0.1:6443 --insecure-skip-tls-verify=true
+                        kubectl config set-credentials jenkins-deployer --token=\${KUBE_TOKEN}
+                        kubectl config set-context k3s --cluster=k3s --user=jenkins-deployer --namespace=${NAMESPACE}
+                        kubectl config use-context k3s
+                        
+                        # Delete previous migration job if exists
+                        kubectl delete job migration-${GIT_COMMIT_SHORT} -n ${NAMESPACE} --ignore-not-found=true
+                        
+                        # Apply migration job from template
+                        sed -e 's/{{GIT_COMMIT}}/${GIT_COMMIT_SHORT}/g' \\
+                            -e 's|{{IMAGE_TAG}}|${GIT_COMMIT_SHORT}|g' \\
+                            k8s/migration-job.yaml | kubectl apply -f -
+                        
+                        # Wait for migration job to complete
+                        kubectl wait --for=condition=complete \\
+                            job/migration-${GIT_COMMIT_SHORT} \\
+                            --timeout=300s -n ${NAMESPACE} || true
+                        
+                        # Show migration logs
+                        POD_NAME=\$(kubectl get pods -n ${NAMESPACE} -l job-name=migration-${GIT_COMMIT_SHORT} -o jsonpath='{.items[0].metadata.name}')
+                        if [ ! -z "\$POD_NAME" ]; then
+                            echo "=== Migration Logs ==="
+                            kubectl logs \$POD_NAME -n ${NAMESPACE}
+                        fi
+                        
+                        # Cleanup temporary kubeconfig
+                        rm -f /tmp/kubeconfig-\${BUILD_ID}
+                    """
+                }
+            }
+        }
+        
+        stage('Seed Database') {
+            when {
+                expression {
+                    params.ACTION == 'Deploy + Seed Database' ||
+                    params.ACTION == 'Seed Database Only'
+                }
+            }
+            steps {
+                echo 'Seeding database with initial data...'
+                withCredentials([string(credentialsId: KUBE_CREDENTIALS_ID, variable: 'KUBE_TOKEN')]) {
+                    sh """
+                        # Use temporary kubeconfig to avoid permission issues
+                        export KUBECONFIG=/tmp/kubeconfig-\${BUILD_ID}
+                        
+                        # Configure kubectl
+                        kubectl config set-cluster k3s --server=https://127.0.0.1:6443 --insecure-skip-tls-verify=true
+                        kubectl config set-credentials jenkins-deployer --token=\${KUBE_TOKEN}
+                        kubectl config set-context k3s --cluster=k3s --user=jenkins-deployer --namespace=${NAMESPACE}
+                        kubectl config use-context k3s
+                        
+                        # Get backend pod name
+                        POD_NAME=\$(kubectl get pods -n ${NAMESPACE} -l app=guindakila-backend -o jsonpath='{.items[0].metadata.name}')
+                        
+                        if [ ! -z "\$POD_NAME" ]; then
+                            echo "Executing seed in pod: \$POD_NAME"
+                            
+                            # Tentar vários comandos (compatibilidade)
+                            if kubectl exec \$POD_NAME -n ${NAMESPACE} -- bun run seed 2>/dev/null; then
+                                echo "✅ Seed executed via 'bun run seed'"
+                            elif kubectl exec \$POD_NAME -n ${NAMESPACE} -- bun run db:seed 2>/dev/null; then
+                                echo "✅ Seed executed via 'bun run db:seed'"
+                            elif kubectl exec \$POD_NAME -n ${NAMESPACE} -- bun seed-db.ts 2>/dev/null; then
+                                echo "✅ Seed executed via 'bun seed-db.ts'"
+                            else
+                                echo "❌ ERROR: Could not execute seed command"
+                                echo "Available npm scripts in pod:"
+                                kubectl exec \$POD_NAME -n ${NAMESPACE} -- cat package.json | grep -A 20 '"scripts"' || true
+                                exit 1
+                            fi
+                            
+                            echo "✅ Database seeded successfully!"
+                        else
+                            echo "❌ ERROR: No backend pod found!"
+                            exit 1
+                        fi
+                        
+                        # Cleanup temporary kubeconfig
+                        rm -f /tmp/kubeconfig-\${BUILD_ID}
+                    """
+                }
+            }
+        }
+        
+        stage('Generate Migration') {
+            when {
+                expression {
+                    params.ACTION == 'Generate Migration Only'
+                }
+            }
+            steps {
+                echo 'Generating new database migration from schema changes...'
+                dir('apps/backend') {
+                    sh '''
+                        export PATH="$HOME/.bun/bin:$PATH"
+                        echo "Running drizzle-kit generate..."
+                        bun run generate
+                        echo "✅ Migration generated successfully!"
+                        echo ""
+                        echo "Generated migration files in apps/backend/drizzle/"
+                        ls -lah drizzle/*.sql | tail -5
+                    '''
+                }
+                
+                script {
+                    echo 'Checking for generated migration files...'
+                    sh '''
+                        if [ -n "$(git status --porcelain apps/backend/drizzle/)" ]; then
+                            echo "✅ New migration files detected:"
+                            git status --short apps/backend/drizzle/
+                            echo ""
+                            echo "⚠️  IMPORTANT: Review and commit these migrations manually"
+                        else
+                            echo "ℹ️  No schema changes detected - no migrations generated"
+                        fi
+                    '''
+                }
+            }
+        }
+        
+        stage('Verify Deployment') {
+            when {
+                not {
+                    expression { params.ACTION ==~ /.*Only/ }
+                }
+            }
+            steps {
+                echo 'Verifying deployment...'
+                withCredentials([string(credentialsId: KUBE_CREDENTIALS_ID, variable: 'KUBE_TOKEN')]) {
+                    sh """
+                        # Use temporary kubeconfig to avoid permission issues
+                        export KUBECONFIG=/tmp/kubeconfig-\${BUILD_ID}
+                        
+                        # Configure kubectl
+                        kubectl config set-cluster k3s --server=https://127.0.0.1:6443 --insecure-skip-tls-verify=true
+                        kubectl config set-credentials jenkins-deployer --token=\${KUBE_TOKEN}
+                        kubectl config set-context k3s --cluster=k3s --user=jenkins-deployer --namespace=${NAMESPACE}
+                        kubectl config use-context k3s
+                        
+                        echo "=== Pods Status ==="
+                        kubectl get pods -n ${NAMESPACE}
+                        
+                        echo "\\n=== Services ==="
+                        kubectl get svc -n ${NAMESPACE}
+                        
+                        echo "\\n=== Ingress ==="
+                        kubectl get ingress -n ${NAMESPACE}
+                        
+                        # Cleanup temporary kubeconfig
+                        rm -f /tmp/kubeconfig-\${BUILD_ID}
+                    """
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo "✅ Action '${params.ACTION}' completed successfully!"
+            script {
+                if (params.ACTION == 'Deploy (Normal)' || params.ACTION == 'Deploy + Seed Database') {
+                    echo "Backend: https://api.guindakila.com.br"
+                    echo "Web: https://app.guindakila.com.br"
+                    echo "WebSocket: wss://ws.guindakila.com.br"
+                }
+            }
+        }
+        
+        failure {
+            script {
+                echo "❌ Action '${params.ACTION}' failed!"
+                echo 'Check Jenkins console output for error details.'
+            }
+        }
+        
+        always {
+            script {
+                echo 'Cleaning up Docker images...'
+                try {
+                    sh 'docker system prune -f || true'
+                } catch (Exception e) {
+                    echo "Cleanup skipped: ${e.message}"
+                }
+            }
+        }
+    }
+}

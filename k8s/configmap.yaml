@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clica-sso-config
+  namespace: clica-sso
+data:
+  # RabbitMQ Configuration
+  RABBITMQ_HOST: "rabbitmq.default.svc.cluster.local"
+  RABBITMQ_PORT: "5672"
+
+  # Frontend API URL (used during build)
+  VITE_API_URL: "https://api.clicatecnologia.com.br"
+  VITE_SOCKET_IO: "wss://ws.clicatecnologia.com.br"
+  VITE_SOCKET_PATCH: "/socket.io/"
+
+  # Backend Configuration
+  NODE_ENV: "production"
+  LOG_LEVEL: "info"
+
+  # Database Configuration (example - adjust as needed)
+  DB_HOST: "postgres.default.svc.cluster.local"
+  DB_PORT: "5432"
+  DB_NAME: "clica_sso"

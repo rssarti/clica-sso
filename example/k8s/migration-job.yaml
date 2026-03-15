@@ -1,0 +1,54 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migration-{{GIT_COMMIT}}
+  namespace: guindakila
+spec:
+  ttlSecondsAfterFinished: 86400 # Mantém logs por 24h
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: docker.io/sispsolutions/guindakila-backend:{{IMAGE_TAG}}
+          command: ["bash", "-c"]
+          args:
+            - |
+              set -e
+              echo "====================================="
+              echo "Installing PostgreSQL client..."
+              echo "====================================="
+              apt-get update -qq
+              apt-get install -y -qq postgresql-client > /dev/null 2>&1
+
+              echo "====================================="
+              echo "Testing database connection..."
+              echo "====================================="
+              psql "$DATABASE_URL" -c "SELECT version();"
+
+              echo "====================================="
+              echo "Applying migrations..."
+              echo "====================================="
+              cd /app/apps/backend/drizzle
+
+              for sql_file in *.sql; do
+                if [ -f "$sql_file" ]; then
+                  echo "Applying: $sql_file"
+                  psql "$DATABASE_URL" -f "$sql_file" || echo "Warning: $sql_file may have already been applied"
+                fi
+              done
+
+              echo "====================================="
+              echo "Migration completed successfully!"
+              echo "====================================="
+          envFrom:
+            - secretRef:
+                name: guindakila-secrets
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"

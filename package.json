@@ -1,0 +1,24 @@
+{
+    "name": "clica-sso",
+    "version": "1.0.0",
+    "description": "Clica SSO Monorepo - Backend and Frontend with Turborepo",
+    "private": true,
+    "packageManager": "pnpm@9.0.5",
+    "engines": {
+        "node": "22.x",
+        "pnpm": "^9.0.0"
+    },
+    "scripts": {
+        "dev": "pnpm exec turbo run dev",
+        "build": "pnpm exec turbo run build",
+        "lint": "pnpm exec turbo run lint",
+        "test": "pnpm exec turbo run test",
+        "test:e2e": "pnpm exec turbo run test:e2e",
+        "start:backend": "pnpm exec turbo run start -F clica-sso-backend",
+        "start:frontend": "pnpm exec turbo run dev -F clica-sso-front",
+        "format": "pnpm exec turbo run format"
+    },
+    "devDependencies": {
+        "turbo": "^2.8.11"
+    }
+}

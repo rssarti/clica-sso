@@ -1,0 +1,159 @@
+pipeline {
+    agent {
+        kubernetes {
+            yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: jenkins-agent
+spec:
+  serviceAccountName: jenkins-deployer
+  containers:
+    - name: node
+      image: node:18-alpine
+      command:
+        - cat
+      tty: true
+      volumeMounts:
+        - mountPath: "/home/jenkins/agent"
+          name: "workspace-volume"
+    - name: kubectl
+      image: alpine/k8s:1.28.3
+      command:
+        - cat
+      tty: true
+      volumeMounts:
+        - mountPath: "/home/jenkins/agent"
+          name: "workspace-volume"
+    - name: kaniko
+      image: gcr.io/kaniko-project/executor:v1.16.0-debug
+      command: ["/busybox/cat"]
+      tty: true
+      volumeMounts:
+        - mountPath: "/home/jenkins/agent"
+          name: "workspace-volume"
+        - name: docker-config
+          mountPath: "/kaniko/.docker"
+  volumes:
+    - name: workspace-volume
+      emptyDir: {}
+    - name: docker-config
+      emptyDir: {}
+"""
+        }
+    }
+    environment {
+        DOCKER_IMAGE = "sispsolutions/clica-sso-front"
+        GIT_CREDENTIALS = "github"
+        DOCKER_CREDENTIALS = "dockerhub"
+        DOCKER_IMAGE_TAG = "${env.DOCKER_IMAGE}:${env.BUILD_ID}"
+    }
+    stages {
+        stage('Checkout') {
+            steps {
+                container('node') {
+                    echo "Clonando repositório..."
+                    echo "Clonando repositório..."
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: '*/main']],
+                        userRemoteConfigs: [[
+                            url: 'https://github.com/rssarti/clica-sso-front',
+                            credentialsId: GIT_CREDENTIALS
+                        ]]
+                    ])
+                }
+            }
+        }
+        stage('Install Dependencies') {
+            steps {
+                container('node') {
+                    echo "Instalando dependências...."
+                    sh '''
+                        apk update && apk add --no-cache git
+                        corepack enable
+                        corepack prepare pnpm@latest --activate
+                        pnpm install
+                    '''
+                }
+            }
+        }
+        stage('Build Application') {
+            steps {
+                container('node') {
+                    echo "Buildando aplicação..."
+                    sh 'pnpm run build'
+                }
+            }
+        }
+        stage('Build & Push Docker Image (Kaniko)') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: env.DOCKER_CREDENTIALS,
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS')
+                ]) {
+                    container('kaniko') {
+                        echo "Construindo e enviando imagem Kaniko: ${DOCKER_IMAGE_TAG}..."
+                        sh '''
+                            cat > /kaniko/.docker/config.json <<EOF
+{
+  "auths": {
+    "https://index.docker.io/v1/": {
+      "auth": "$(echo -n ${DOCKER_USER}:${DOCKER_PASS} | base64)"
+    }
+  }
+}
+EOF
+                            /kaniko/executor --context=${PWD} \\
+                                --dockerfile=Dockerfile \\
+                                --destination=''' + "${DOCKER_IMAGE_TAG}" + ''' \\
+                                --destination=''' + "${DOCKER_IMAGE}:latest" + '''
+                        '''
+                    }
+                }
+            }
+        }
+        stage('Deploy to Production') {
+            steps {
+                container('kubectl') {
+                    echo "Aplicando recursos Kubernetes..."
+                    script {
+                        sh "kubectl apply -f k8s/configmap.yaml"
+                        sh "kubectl apply -f k8s/deployment.yaml"
+                        sh "kubectl set image deployment/clica-sso-front clica-sso-front=${DOCKER_IMAGE_TAG} -n default"
+                        
+                        echo "Aguardando rollout..."
+                        def rolloutStatus = sh(script: "kubectl rollout status deployment/clica-sso-front -n default --timeout=180s", returnStatus: true)
+                        
+                        if (rolloutStatus != 0) {
+                            echo "⚠️ Rollout falhou ou demorou muito. Verificando status..."
+                            sh "kubectl get pods -n default -l app=clica-sso-front"
+                            sh "kubectl describe pods -n default -l app=clica-sso-front | tail -100"
+                            error("Rollout falhou - verifique os logs acima")
+                        }
+                    }
+                }
+            }
+        }
+        stage('Health Check') {
+            steps {
+                container('kubectl') {
+                    echo "Verificando status do deployment..."
+                    sh 'kubectl get pods -l app=clica-sso-front'
+                }
+            }
+        }
+    }
+    post {
+        always {
+            echo "Limpando workspace..."
+            cleanWs()
+        }
+        failure {
+            echo "Deploy falhou!"
+            echo "Verifique os logs para mais detalhes"
+        }
+    }
+}

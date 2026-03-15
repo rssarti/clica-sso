@@ -1,0 +1,81 @@
+version: "3.8"
+
+services:
+  # ===== BANCO DE DADOS =====
+  postgres:
+    image: postgres:16-alpine
+    container_name: clica-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: clica_sso
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./apps/clica-sso-backend/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - clica-network
+
+  # ===== FILA DE MENSAGENS =====
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: clica-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672" # AMQP protocol port
+      - "15672:15672" # Management UI (http://localhost:15672)
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin123
+      RABBITMQ_DEFAULT_VHOST: /
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    networks:
+      - clica-network
+    depends_on:
+      - postgres
+
+  # ===== GERENCIAMENTO DO BANCO =====
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: clica-pgadmin
+    restart: unless-stopped
+    ports:
+      - "5050:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@clica.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - clica-network
+    depends_on:
+      - postgres
+
+# ===== VOLUMES =====
+volumes:
+  postgres_data:
+    driver: local
+  rabbitmq_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+# ===== REDES =====
+networks:
+  clica-network:
+    driver: bridge
+    name: clica-network

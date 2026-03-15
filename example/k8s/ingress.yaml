@@ -1,0 +1,57 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: guindakila-ingress
+  namespace: guindakila
+  annotations:
+    # Traefik Ingress Controller annotations
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+    # Redirect HTTP to HTTPS
+    traefik.ingress.kubernetes.io/redirect-entry-point: websecure
+    traefik.ingress.kubernetes.io/redirect-permanent: "true"
+    # Certificate management with cert-manager
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - api.guindakila.com.br
+        - app.guindakila.com.br
+        - ws.guindakila.com.br
+      secretName: guindakila-tls-cert
+  rules:
+    # Backend API
+    - host: api.guindakila.com.br
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: guindakila-backend-service
+                port:
+                  number: 3000
+
+    # Web Frontend
+    - host: app.guindakila.com.br
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: guindakila-web-service
+                port:
+                  number: 80
+
+    # WebSocket Server
+    - host: ws.guindakila.com.br
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: guindakila-ws-service
+                port:
+                  number: 8081

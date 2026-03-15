@@ -1,0 +1,102 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clica-sso-front
+  namespace: default
+  labels:
+    app: clica-sso-front
+    tier: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: clica-sso-front
+  template:
+    metadata:
+      labels:
+        app: clica-sso-front
+        tier: frontend
+    spec:
+      containers:
+      - name: clica-sso-front
+        image: sispsolutions/clica-sso-front:latest
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: VITE_API_URL
+          value: "https://api.clicatecnologia.com.br"
+        - name: VITE_SSO_URL
+          value: "https://accounts.clicatecnologia.com.br"
+        - name: VITE_SOCKET_IO
+          value: "https://accounts.clicatecnologia.com.br"
+        - name: VITE_SOCKET_PATCH
+          value: "/socket.io/"
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1001
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clica-sso-front-service
+  namespace: default
+  labels:
+    app: clica-sso-front
+spec:
+  selector:
+    app: clica-sso-front
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: clica-sso-front-ingress
+  namespace: default
+  annotations:
+    kubernetes.io/ingress.class: traefik
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  rules:
+  - host: accounts.clicatecnologia.com.br
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: clica-sso-front-service
+            port:
+              number: 80
+  tls:
+  - hosts:
+    - accounts.clicatecnologia.com.br
+    secretName: clica-sso-front-tls
