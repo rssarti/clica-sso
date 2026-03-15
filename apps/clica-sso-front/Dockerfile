@@ -60,7 +60,7 @@ RUN mkdir -p /tmp /var/cache/nginx/client_temp /var/cache/nginx/proxy_temp \
 # Variáveis de ambiente padrão
 ENV VITE_API_URL=https://api.clicatecnologia.com.br
 ENV VITE_SSO_URL=https://accounts.clicatecnologia.com.br
-ENV VITE_SOCKET_IO=https://accounts.clicatecnologia.com.br
+ENV VITE_SOCKET_IO=wss://ws.clicatecnologia.com.br
 ENV VITE_SOCKET_PATCH=/socket.io/
 
 # Labels para metadados
