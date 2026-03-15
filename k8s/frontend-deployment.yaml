@@ -23,10 +23,10 @@ spec:
       serviceAccountName: jenkins-deployer
       containers:
         - name: frontend
-          image: docker.io/${DOCKER_USERNAME}/clica-sso-frontend:latest
+          image: docker.io/sispsolutions/clica-sso-frontend:latest
           imagePullPolicy: Always
           ports:
-            - containerPort: 80
+            - containerPort: 8080
               name: http
           env:
             - name: VITE_API_URL
@@ -56,7 +56,7 @@ spec:
           livenessProbe:
             httpGet:
               path: /
-              port: 80
+              port: 8080
             initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 3
@@ -65,7 +65,7 @@ spec:
           readinessProbe:
             httpGet:
               path: /
-              port: 80
+              port: 8080
             initialDelaySeconds: 5
             periodSeconds: 5
             timeoutSeconds: 3
@@ -82,8 +82,8 @@ metadata:
 spec:
   type: ClusterIP
   ports:
-    - port: 80
-      targetPort: 80
+    - port: 8080
+      targetPort: 8080
       protocol: TCP
       name: http
   selector:

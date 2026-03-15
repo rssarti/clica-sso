@@ -42,7 +42,7 @@ spec:
               service:
                 name: clica-sso-frontend-service
                 port:
-                  number: 80
+                  number: 8080
 
     # WebSocket Server
     - host: ws.clicatecnologia.com.br
